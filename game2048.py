@@ -16,10 +16,14 @@ class Game2048:
     PROB_2 = .9
     NUM_START_TILES = 2
 
-    def __init__(self):
+    def __init__(self, game_board = None, valid_directions = []):
         self.score = 0
-        self.initialize_game_board()
-        self.valid_directions = list(Direction)
+        self.valid_directions = valid_directions
+        if not game_board:
+            self.initialize_game_board()
+            self.valid_directions = list(Direction)
+        else:
+            self.game_board = game_board
 
     def __str__(self):
         return "\n".join(str(row) for row in self.game_board)
@@ -27,17 +31,17 @@ class Game2048:
     def initialize_game_board(self):
         self.game_board = [[0 for _ in range(self.BOARD_SIZE)] for _ in range(self.BOARD_SIZE)]
         for _ in range(self.NUM_START_TILES):
-            self.add_tile_to_board(self.game_board)
+            self.add_tile_to_board()
 
-    def find_empty_cells(self, board):
+    def find_empty_cells(self):
         empty = []
-        for i in range(len(board)):
-            for j in range(len(board[0])):
-                if board[i][j] == 0:
+        for i in range(len(self.game_board)):
+            for j in range(len(self.game_board[0])):
+                if self.game_board[i][j] == 0:
                     empty.append((i, j))
         return empty
 
-    def add_tile_to_board(self, board):
+    def add_tile_to_board(self):
         random_float = random()
         number = None
         if random_float < self.PROB_2:
@@ -45,16 +49,16 @@ class Game2048:
         else:
             number = 4
         
-        empty_cells = self.find_empty_cells(board)
+        empty_cells = self.find_empty_cells()
         x_index, y_index = empty_cells[randrange(0, len(empty_cells))]
-        board[x_index][y_index] = number
+        self.game_board[x_index][y_index] = number
     
-    def collapse_tiles(self, direction, board):
+    def collapse_tiles(self, direction):
         if not isinstance(direction, Direction):
             raise Exception(f"{direction} is not a valid direction.")
-        new_board = self.transform_dir(board, direction)
+        new_board = self.transform_dir(self.game_board, direction)
         score = 0
-        for i in range(len(board)):
+        for i in range(len(self.game_board)):
             score += self.collapse_row(new_board[i])
         return self.transform_dir(new_board, direction, reverse = True), score
 
@@ -84,12 +88,13 @@ class Game2048:
         return score
 
     
-    def move(self, direction):
+    def move(self, direction, add_tile = True):
         if not self.is_valid_move(direction):
             raise Exception(f"Move {direction} is not valid")
-        new_board, score = self.collapse_tiles(direction, self.game_board)
+        new_board, score = self.collapse_tiles(direction)
         self.game_board = new_board
-        self.add_tile_to_board(self.game_board)
+        if add_tile:
+            self.add_tile_to_board()
         self.score += score
         self.compute_valid_directions()
         return True
@@ -98,7 +103,7 @@ class Game2048:
     def compute_valid_directions(self):
         valid_directions = []
         for direction in Direction:
-            new_board, score = self.collapse_tiles(direction, self.game_board)
+            new_board, _ = self.collapse_tiles(direction)
             if new_board == self.game_board:
                 continue
             valid_directions.append(direction)
@@ -141,14 +146,22 @@ class Game2048:
         if not isinstance(direction, Direction):
             raise Exception("Not a valid direction")
     
-    def get_max_num(self, board):
-        return max([max(row) for row in board])
+    def get_max_num(self):
+        return max([max(row) for row in self.game_board])
 
-    def get_num_tiles(self, board):
+    def get_num_tiles(self):
         num_nonzero = 0
-        for row in board:
+        for row in self.game_board:
             num_nonzero += len([elem for elem in row if elem != 0])
         return num_nonzero
+
+
+    def __deepcopy__(self, memo = {}):
+        copy = Game2048(deepcopy(self.game_board))
+        copy.score = self.score
+        copy.valid_directions = self.valid_directions
+        return copy
+
 
 rect_color_map = {0: "gray", 2: "wheat1", 4: "wheat2", 8: "tan1"}
 
@@ -196,6 +209,7 @@ def play_user_game():
                     move = Direction.DOWN
         if isinstance(move, Direction) and game.is_valid_move(move):
             if game.move(move):
+                print(game)
                 draw_game(game, window_size, screen)
 
 
