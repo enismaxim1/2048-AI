@@ -18,6 +18,7 @@ class Game2048:
 
     def __init__(self, game_board = None, valid_directions = []):
         self.score = 0
+        self.tile_sum = 0
         self.valid_directions = valid_directions
         if not game_board:
             self.initialize_game_board()
@@ -41,17 +42,24 @@ class Game2048:
                     empty.append((i, j))
         return empty
 
-    def add_tile_to_board(self):
-        random_float = random()
-        number = None
-        if random_float < self.PROB_2:
-            number = 2
+    def add_tile_to_board(self, cell = None, number = None):
+        if not cell:
+            random_float = random()
+            number = None
+            if random_float < self.PROB_2:
+                number = 2
+            else:
+                number = 4
+            empty_cells = self.find_empty_cells()
+            if not empty_cells:
+                raise Exception("Cannot add tile to complete board")
+            x_index, y_index = empty_cells[randrange(0, len(empty_cells))]
         else:
-            number = 4
-        
-        empty_cells = self.find_empty_cells()
-        x_index, y_index = empty_cells[randrange(0, len(empty_cells))]
+            x_index, y_index = cell
         self.game_board[x_index][y_index] = number
+        self.tile_sum += number
+        self.compute_valid_directions()
+
     
     def collapse_tiles(self, direction):
         if not isinstance(direction, Direction):
@@ -96,7 +104,6 @@ class Game2048:
         if add_tile:
             self.add_tile_to_board()
         self.score += score
-        self.compute_valid_directions()
         return True
 
     # Computes the valid directions for the board state.
@@ -142,7 +149,6 @@ class Game2048:
         elif direction == Direction.DOWN:
             k = -1 if not reverse else 1
             return self.rotate(board, k)
-        print(direction)
         if not isinstance(direction, Direction):
             raise Exception("Not a valid direction")
     
@@ -157,9 +163,10 @@ class Game2048:
 
 
     def __deepcopy__(self, memo = {}):
-        copy = Game2048(deepcopy(self.game_board))
+        copy = Game2048(game_board = deepcopy(self.game_board))
         copy.score = self.score
-        copy.valid_directions = self.valid_directions
+        copy.tile_sum = self.tile_sum
+        copy.valid_directions = deepcopy(self.valid_directions)
         return copy
 
 
@@ -209,7 +216,7 @@ def play_user_game():
                     move = Direction.DOWN
         if isinstance(move, Direction) and game.is_valid_move(move):
             if game.move(move):
-                print(game)
+                print(game.tile_sum)
                 draw_game(game, window_size, screen)
 
 

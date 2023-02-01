@@ -1,12 +1,13 @@
 from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
-from random import randrange, random
+from random import randrange, random, choice
 from abc import ABC, abstractmethod
 from game2048 import *
+from monte_carlo_tree import *
 import math
 
-from util import hash_board
+from util import *
 
 class Agent(ABC):
     DIRECTIONS = [Direction.UP, Direction.LEFT, Direction.RIGHT, Direction.DOWN]
@@ -17,6 +18,16 @@ class Agent(ABC):
 
     def _type(self):
         return self.__class__.__name__
+
+    def heuristic(self, game):
+        heuristic = 0
+        row = game.game_board[0]
+        for i in range(0, len(row) - 1):
+            if row[i] == 0:
+                continue
+            heuristic += math.log2(row[i]) * (5-i)
+        heuristic += (game.BOARD_SIZE ** 2 - game.get_num_tiles()) * math.log2(game.game_board[0][0] + 1)
+        return heuristic
 
 class RandomAgent(Agent):
 
@@ -43,17 +54,6 @@ class SearchAgent(Agent):
         _, move = self.multi_level_heuristic(game, 2)
         return move
 
-    def heuristic(self, game):
-        heuristic = 0
-        row = game.game_board[0]
-        for i in range(0, len(row) - 1):
-            if row[i] == 0:
-                continue
-            heuristic += math.log2(row[i]) * (5-i)
-        heuristic += (game.BOARD_SIZE ** 2 - game.get_num_tiles()) * math.log2(game.game_board[0][0] + 1)
-        return heuristic
-
-
     def multi_level_heuristic(self, game: Game2048, depth):
         if depth == 0:
             return 0, None
@@ -74,8 +74,6 @@ class SearchAgent(Agent):
 
 class AveragingSearchAgent(Agent):
 
-    
-
     def __init__(self, default_search_depth = 3):
         super()
         self.default_search_depth = default_search_depth
@@ -83,17 +81,6 @@ class AveragingSearchAgent(Agent):
     def next_move(self, game):
         _, move = self.multi_level_heuristic(game, self.default_search_depth)
         return move
-
-    def heuristic(self, game):
-        heuristic = 0
-        row = game.game_board[0]
-        for i in range(0, len(row) - 1):
-            if row[i] == 0:
-                continue
-            heuristic += math.log2(row[i]) * (5-i)
-        heuristic += (game.BOARD_SIZE ** 2 - game.get_num_tiles()) * math.log2(game.game_board[0][0] + 1)
-        return heuristic
-
 
     def multi_level_heuristic(self, game: Game2048, depth):
         if depth == 0:
@@ -120,17 +107,8 @@ class AveragingSearchAgent(Agent):
         return max_heuristic, best_move
 
 class MonteCarloAgent(Agent):
-    policy = SmarterAgent()
 
-    def heuristic(self, game):
-        heuristic = 0
-        row = game.game_board[0]
-        for i in range(0, len(row) - 1):
-            if row[i] == 0:
-                continue
-            heuristic += math.log2(row[i]) * (5-i)
-        heuristic += (game.BOARD_SIZE ** 2 - game.get_num_tiles()) * math.log2(game.game_board[0][0] + 1)
-        return heuristic
+    policy = SmarterAgent()
 
     def next_move(self, game):
         num_avg = 10
@@ -154,86 +132,79 @@ class MonteCarloAgent(Agent):
 
 class MonteCarloTreeSearchAgent(Agent):
 
-    class TreeNode():
-
-        def __init__(self, game = Game2048, max_node = True, score = 0, num_simulations = 0, children = {}):
-            self.game = game
-            self.max_node = max_node
-            self.score = score
-            self.num_simulations = num_simulations
-            self.children = children
-
-        def add_children(self):
-            new_children = {}
-            if self.max_node:
-                for direction in self.game.valid_directions:
-                    if not self.game.is_valid_move(direction):
-                        continue
-                    new_game = deepcopy(self.game)
-                    new_game.move(direction, add_tile = False)
-                    # a child is a node along with an edge weight
-                    new_children[hash_board(new_game.game_board)] = (type(self)(new_game, False), 1, direction)
-            else:
-                for cell_x, cell_y in self.game.find_empty_cells():
-                    for tile_num in [2,4]:
-                        new_game = deepcopy(self.game)
-                        new_game.game_board[cell_x][cell_y] = tile_num
-                        edge_weight = new_game.PROB_2 if tile_num == 2 else 1 - new_game.PROB_2
-                        # a child is a node along with an edge weight   
-                        new_children[hash_board(new_game.game_board)] = (type(self)(new_game, True), edge_weight, (cell_x, cell_y))
-            self.children = new_children
-        
-        def __str__(self):
-            return str(self.game)
-
-    def __init__(self, explore_prob = 0.2):
-        self.search_agent = SearchAgent(1)
+    def __init__(self, num_iterations = 10):
+        self.search_agent = SearchAgent(2)
         self.random_agent = RandomAgent()
-        self.explore_prob = explore_prob
         self.game_tree = None
-        self.memo = {}
-
+        self.num_iterations = num_iterations
 
     def next_move(self, game):
-        if game.get_max_num() < 256:
-            return self.search_agent.next_move(game)
 
         if not self.game_tree:
-            self.game_tree = self.TreeNode(game)
+            self.game_tree = MaxNode(game = game)
+            self.game_tree.score += self.simulate(self.game_tree)
+            self.game_tree.num_simulations += 1
         else:
-            self.game_tree, _, _ = self.game_tree.children[hash_board(game.game_board)]
+            self.game_tree = self.game_tree.children[hash_board(game.game_board)]
 
-        for _ in range(4):
+
+        for i in range(self.num_iterations):
             self.run_mcts_iteration(self.game_tree)
 
         max_num_simulations, max_direction = 0, None
-        for child, _, direction, in self.game_tree.children.values():
-            if child.num_simulations >= max_num_simulations:
-                max_num_simulations, max_direction = child.num_simulations, direction
-        self.game_tree = child
+        last_child = None
+        for child in self.game_tree.children.values():
+            if not game.is_valid_move(child.direction):
+                continue
+            print("direction:", child.direction)
+            print("num simulations:", child.num_simulations)
+            print("score", child.avg_score())
+            if child.num_simulations > max_num_simulations:
+                max_num_simulations, max_direction = child.num_simulations, child.direction
+                last_child = child
+        self.game_tree = last_child
+        print("best direction", max_direction)
         return max_direction
         
     
-    def run_mcts_iteration(self, root: TreeNode):
+    def run_mcts_iteration(self, root):
         path = self.select(root)
+        # print("path", path)
         leaf = path[-1]
         # add child nodes to leaf, if nonterminal
         if not leaf.game.lose():
             leaf.add_children()
+            print(len(leaf.children))
             # run simulations on all children of node
-            for child, _, _ in leaf.children.values():
-                result = self.simulate(child)
-                # backpropogate results to every node in path
-                self.backpropagate(path, result)
-        print("iter")
+            for expectation_child in leaf.children.values():
+                expectation_child.add_children()
+                path.append(expectation_child)
+                for child in expectation_child.children.values():
+                    result = self.simulate(child)
+                    path.append(child)
+                    # print("game:")
+                    # print(child.game)
+                    # print("result:", result)
+                    # backpropagate results to every node in path
+                    self.backpropagate(path, result)
+                    path.pop()
+                path.pop()
+
     def select(self, root):
 
         def find_best_child(root):
-            max_avg_score, max_child = 0, None
-            for child, _, _ in root.children.values():
-                avg_score = 0 if not child.num_simulations else child.score / child.num_simulations
-                if avg_score >= max_avg_score:
-                    max_avg_score, max_child = avg_score, child
+            max_policy, max_child = 0, None
+            C = 0.25
+            for child in root.children.values():
+                if not child.num_simulations:
+                    print("BUG", child)
+                avg_score = child.avg_score() if isinstance(child, ExpectationNode) else 0.5 * random()
+                policy =  avg_score + C * math.sqrt(math.log2(child.parent.num_simulations) / child.num_simulations)
+                # print("exploitation term", avg_score)
+                # print("exploration term", C * math.sqrt(math.log(child.parent.num_simulations) / child.num_simulations))
+                if isinstance(child, ExpectationNode): print(policy, child.direction)
+                if policy >= max_policy:
+                    max_policy, max_child = policy, child
             return max_child
 
         # select until we reach a leaf
@@ -243,36 +214,41 @@ class MonteCarloTreeSearchAgent(Agent):
             node = find_best_child(node)
             path.append(node)
         return path
+
+    def random_path(self, root):
+        path = [root]
+        node = root
+        while node.children:
+            node = choice([child for child in node.children.values()])
+            path.append(node)
+        return path
     
     def simulate(self, root):
-        is_max_node = root.max_node
         game_copy = deepcopy(root.game)
-        if not is_max_node:
-            game_copy.add_tile_to_board()
-
-        hashed_board = hash_board(root.game.game_board)
-        if hashed_board in self.memo:
-            return self.memo[hashed_board]
-
-        while not game_copy.lose():
+        max_num_moves = 2
+        num_moves = 0
+        while not game_copy.lose() and num_moves < max_num_moves:
             game_copy.move(self.search_agent.next_move(game_copy))
-        
-        result = math.log2(game_copy.get_max_num())
-        self.memo[hashed_board] = result
-        return result
+            num_moves += 1
 
-    def backpropagate(self, path: List[TreeNode], result):
+        heuristic = self.heuristic(game_copy)
+        scaled = heuristic / ((math.log2(game_copy.tile_sum)) * 26 + 12)
+        # print("scaled:", scaled)
+        if scaled > 1:
+            print(heuristic)
+            print(((math.log2(game_copy.tile_sum)) * 26 + 12))
+            print(game_copy.tile_sum)
+            print(game_copy)
+            raise Exception("You fucking idiot! Your scaled function doesn't even work")
+        return scaled
+
+    def backpropagate(self, path, result):
         for node in reversed(path):
             node.num_simulations += 1
-            if node.max_node:
+            if isinstance(node, MaxNode):
                 node.score += result
-            else:
-                for child, edge_weight, _ in node.children.values():
-                    avg_score = 0 if not child.num_simulations else child.score / child.num_simulations
-                    node.score += avg_score * edge_weight
-
-
-
+                if node.score/node.num_simulations > 1:
+                    raise Exception(f"FUCK! {node.score} {node.num_simulations}")
 
 
 class TestPerformance:
@@ -293,7 +269,6 @@ class TestPerformance:
                 score, max_num = game.score, int(math.log2(game.get_max_num()))
                 scores.append(score)
                 maxes.append(max_num)
-                print(agent._type(), max_num)
             agent_scores.append(scores)
             agent_maxes.append(maxes)
 
@@ -327,14 +302,14 @@ def play_ai_game(agent):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 exit()
- 
-        move = agent.next_move(game)
-        if isinstance(move, Direction) and game.is_valid_move(move):
-            if game.move(move):
-                draw_game(game, window_size, screen)
+        if not game.lose():
+            move = agent.next_move(game)
+            if isinstance(move, Direction) and game.is_valid_move(move):
+                if game.move(move):
+                    draw_game(game, window_size, screen)
 
 def main():
-    # agent = TestPerformance([SmarterAgent(), SearchAgent(), MonteCarloAgent()])
+    # agent = TestPerformance([AveragingSearchAgent(), MonteCarloAgent()])
     # print(agent.evaluate_performance())
     play_ai_game(MonteCarloTreeSearchAgent())
 
