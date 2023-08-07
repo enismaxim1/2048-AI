@@ -1,3 +1,4 @@
+from time import time
 from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
@@ -132,11 +133,12 @@ class MonteCarloAgent(Agent):
 
 class MonteCarloTreeSearchAgent(Agent):
 
-    def __init__(self, num_iterations = 10):
-        self.search_agent = SearchAgent(2)
+    def __init__(self, num_iterations = 5):
+        self.search_agent = SearchAgent(1)
         self.random_agent = RandomAgent()
         self.game_tree = None
         self.num_iterations = num_iterations
+        self.memo = {}
 
     def next_move(self, game):
 
@@ -156,25 +158,19 @@ class MonteCarloTreeSearchAgent(Agent):
         for child in self.game_tree.children.values():
             if not game.is_valid_move(child.direction):
                 continue
-            print("direction:", child.direction)
-            print("num simulations:", child.num_simulations)
-            print("score", child.avg_score())
             if child.num_simulations > max_num_simulations:
                 max_num_simulations, max_direction = child.num_simulations, child.direction
                 last_child = child
         self.game_tree = last_child
-        print("best direction", max_direction)
         return max_direction
         
     
     def run_mcts_iteration(self, root):
         path = self.select(root)
-        # print("path", path)
         leaf = path[-1]
         # add child nodes to leaf, if nonterminal
         if not leaf.game.lose():
             leaf.add_children()
-            print(len(leaf.children))
             # run simulations on all children of node
             for expectation_child in leaf.children.values():
                 expectation_child.add_children()
@@ -182,27 +178,21 @@ class MonteCarloTreeSearchAgent(Agent):
                 for child in expectation_child.children.values():
                     result = self.simulate(child)
                     path.append(child)
-                    # print("game:")
-                    # print(child.game)
-                    # print("result:", result)
                     # backpropagate results to every node in path
                     self.backpropagate(path, result)
                     path.pop()
                 path.pop()
+        else:
+            raise Exception(f"Game leaf {leaf} is unexpectedly losing")
 
     def select(self, root):
 
         def find_best_child(root):
             max_policy, max_child = 0, None
-            C = 0.25
+            C = 0.2
             for child in root.children.values():
-                if not child.num_simulations:
-                    print("BUG", child)
-                avg_score = child.avg_score() if isinstance(child, ExpectationNode) else 0.5 * random()
+                avg_score = child.avg_score() if isinstance(child, ExpectationNode) else 0.01 * random()
                 policy =  avg_score + C * math.sqrt(math.log2(child.parent.num_simulations) / child.num_simulations)
-                # print("exploitation term", avg_score)
-                # print("exploration term", C * math.sqrt(math.log(child.parent.num_simulations) / child.num_simulations))
-                if isinstance(child, ExpectationNode): print(policy, child.direction)
                 if policy >= max_policy:
                     max_policy, max_child = policy, child
             return max_child
@@ -233,13 +223,8 @@ class MonteCarloTreeSearchAgent(Agent):
 
         heuristic = self.heuristic(game_copy)
         scaled = heuristic / ((math.log2(game_copy.tile_sum)) * 26 + 12)
-        # print("scaled:", scaled)
         if scaled > 1:
-            print(heuristic)
-            print(((math.log2(game_copy.tile_sum)) * 26 + 12))
-            print(game_copy.tile_sum)
-            print(game_copy)
-            raise Exception("You fucking idiot! Your scaled function doesn't even work")
+            raise Exception(f"Scaled heuristic value {heuristic} exceeds 1")
         return scaled
 
     def backpropagate(self, path, result):
@@ -247,8 +232,8 @@ class MonteCarloTreeSearchAgent(Agent):
             node.num_simulations += 1
             if isinstance(node, MaxNode):
                 node.score += result
-                if node.score/node.num_simulations > 1:
-                    raise Exception(f"FUCK! {node.score} {node.num_simulations}")
+                if (avg_node_score := node.score/node.num_simulations > 1):
+                    raise Exception(f"Average node score {avg_node_score} exceeds 1")
 
 
 class TestPerformance:
@@ -296,7 +281,8 @@ def play_ai_game(agent):
 
     screen = pygame.display.set_mode(size)
     draw_game(game, window_size, screen)
-
+    num_moves = 0
+    start_time = time()
     while True:
         move = None
         for event in pygame.event.get():
@@ -304,9 +290,10 @@ def play_ai_game(agent):
                 exit()
         if not game.lose():
             move = agent.next_move(game)
+            num_moves += 1
             if isinstance(move, Direction) and game.is_valid_move(move):
                 if game.move(move):
-                    draw_game(game, window_size, screen)
+                    draw_game(game, window_size, screen, avg_move_time = (time() - start_time) / num_moves)
 
 def main():
     # agent = TestPerformance([AveragingSearchAgent(), MonteCarloAgent()])

@@ -32,18 +32,11 @@ class ExpectationNode(TreeNode):
         self.children = new_children
     
     def avg_score(self):
-        score = 0
-        prob_sum = 0
+        min_score = float("inf")
         for child in self.children.values():
-            prob_sum += child.edge_weight
-            score += child.edge_weight * child.score / child.num_simulations 
-            if child.score / child.num_simulations > 1:
-                raise Exception(f"FUCK! {child.score} {child.num_simulations}")
-        if prob_sum > 1.1:
-            raise Exception(f"prob sum is {prob_sum}")
-        if score > 1:
-            raise Exception("FUCK!")
-        return score
+            if child.score / child.num_simulations < min_score:
+                min_score = child.score / child.num_simulations
+        return min_score
 
     def __str__(self):
         string =  f"num simulations: {self.num_simulations}\ngame:\n{str(self.game)}\ndirection: {self.direction}"
@@ -60,8 +53,6 @@ class MaxNode(TreeNode):
             raise Exception("Node already has children")
         new_children = {}
         for direction in self.game.valid_directions:
-            if not self.game.is_valid_move(direction):
-                raise Exception("WTF")
             new_game = deepcopy(self.game)
             new_game.move(direction, add_tile = False)
             # a child is a node along with an edge weight

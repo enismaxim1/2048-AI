@@ -1,6 +1,7 @@
 from random import random, randrange
 from copy import deepcopy
 from enum import Enum
+from util import hash_board
 import pygame
 
 class Direction(Enum):
@@ -16,10 +17,11 @@ class Game2048:
     PROB_2 = .9
     NUM_START_TILES = 2
 
-    def __init__(self, game_board = None, valid_directions = []):
-        self.score = 0
-        self.tile_sum = 0
+    def __init__(self, game_board = None, score = 0, tile_sum = 0, valid_directions = [], board_memo = {}):
+        self.score = score
+        self.tile_sum = tile_sum
         self.valid_directions = valid_directions
+        self.board_memo = board_memo
         if not game_board:
             self.initialize_game_board()
             self.valid_directions = list(Direction)
@@ -58,17 +60,22 @@ class Game2048:
             x_index, y_index = cell
         self.game_board[x_index][y_index] = number
         self.tile_sum += number
+        self.board_memo = {}
         self.compute_valid_directions()
-
     
     def collapse_tiles(self, direction):
         if not isinstance(direction, Direction):
             raise Exception(f"{direction} is not a valid direction.")
+        if direction in self.board_memo:
+            return self.board_memo[direction]
+
         new_board = self.transform_dir(self.game_board, direction)
         score = 0
         for i in range(len(self.game_board)):
             score += self.collapse_row(new_board[i])
-        return self.transform_dir(new_board, direction, reverse = True), score
+        collapsed = self.transform_dir(new_board, direction, reverse = True), score
+        self.board_memo[direction] = collapsed
+        return collapsed
 
     def collapse_row(self, row):
         score = 0
@@ -100,7 +107,7 @@ class Game2048:
         if not self.is_valid_move(direction):
             raise Exception(f"Move {direction} is not valid")
         new_board, score = self.collapse_tiles(direction)
-        self.game_board = new_board
+        self.game_board = deepcopy(new_board)
         if add_tile:
             self.add_tile_to_board()
         self.score += score
@@ -163,17 +170,20 @@ class Game2048:
 
 
     def __deepcopy__(self, memo = {}):
-        copy = Game2048(game_board = deepcopy(self.game_board))
-        copy.score = self.score
-        copy.tile_sum = self.tile_sum
-        copy.valid_directions = deepcopy(self.valid_directions)
+        score = self.score
+        tile_sum = self.tile_sum
+        valid_directions = self.valid_directions.copy()
+        board_memo = self.board_memo.copy()
+        copy = Game2048(game_board = deepcopy(self.game_board), score = score, tile_sum = tile_sum, valid_directions=valid_directions, board_memo=board_memo)
         return copy
 
+    def __hash__(self):
+        return hash_board(self.game_board)
 
 rect_color_map = {0: "gray", 2: "wheat1", 4: "wheat2", 8: "tan1"}
 
 
-def draw_game(game: Game2048, window_size, screen):
+def draw_game(game: Game2048, window_size, screen, avg_move_time = None):
     screen.fill("white")
     margin = window_size / 10
     block_size = (window_size - 2 * margin) / game.BOARD_SIZE
@@ -188,7 +198,12 @@ def draw_game(game: Game2048, window_size, screen):
                 text_rect = text.get_rect(center = (x + block_size / 2, y + block_size / 2))
                 screen.blit(text, text_rect)
             pygame.draw.rect(screen, (0,0,0), rect, 1)
-
+    
+    if avg_move_time:
+        font = pygame.font.SysFont('arial', int(margin // 4))
+        text = font.render(f"Average move time: {avg_move_time:.2f}", True, (0, 0, 0))
+        text_rect = text.get_rect(center = (window_size / 2, margin / 2))
+        screen.blit(text, text_rect)
     pygame.display.update()
 
 def play_user_game():
@@ -216,7 +231,6 @@ def play_user_game():
                     move = Direction.DOWN
         if isinstance(move, Direction) and game.is_valid_move(move):
             if game.move(move):
-                print(game.tile_sum)
                 draw_game(game, window_size, screen)
 
 
